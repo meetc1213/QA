@@ -3,8 +3,9 @@ import numpy as np
 import pyscf
 import matplotlib.pyplot as plt
 import basis_set_exchange as bse
-from FcMole import FcM, FcM_like
-from AP_class import APDFT_perturbator as AP
+from g_modules.FcMole import FcM, FcM_like
+from g_modules.AP_class import APDFT_perturbator as AP
+
 
 # creating a NNH molecule
 ex = gto.M(atom= f"N 0 0 0; N 0 0 2.1; H 0 0 {2.1+0.94}",unit="Bohr",charge=1,basis='unc-ccpvdz')
