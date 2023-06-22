@@ -71,3 +71,6 @@ def ff5(lam, A, f, p, exp, A2, f2, p2, exp2, A3, f3, p3, exp3, A4, f4, p4, exp4,
 
 def x_n(freq, A,offset,n,base):
     return A*(freq+offset)**n + base
+
+def exp(freq, A, offset,n):
+    return A*np.exp((freq+offset)*n)

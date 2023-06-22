@@ -13,11 +13,13 @@ from g_modules.AP_class import APDFT_perturbator as AP
 from g_modules.alch_deriv import first_deriv_elec,DeltaV
 from m_modules.config import *
 
-max_lam, steps, step = return_max_lam_steps()
+max_lam, steps, step, exponent = return_max_lam_steps()
 
 def get_free_energy(mol_i, n):
     '''takes a molecule and the power of the free energy term and returns the free energy'''
-    return -0.5*np.sum(mol_i.atom_charges()**n)
+    if n == 2:
+        return -0.5*np.sum(mol_i.atom_charges()**n)
+    return np.sum(mol_i.atom_charges()**n)
 
 def new_mol(mol_i,n,l_i, l_f, left_right = None):
     '''Returns a new molecule, the converged object,
@@ -90,7 +92,7 @@ def get_symmetric_change_data(min_lam,max_lam, gen=False):
         free_energies = []
         i = min_lam
         while round(i,3) <= max_lam:
-            mol_props = new_mol(NN,7/3, -i,i)
+            mol_props = new_mol(NN,exponent, -i,i)
             e_mol = mol_props[2]
             free_e = mol_props[3]
             frac_energies.append(e_mol)
@@ -113,11 +115,11 @@ def get_asymmetric_change_data(min_lam,max_lam, gen=False):
         i = min_lam
 
         while round(i,3) <= max_lam:
-            mol_props_R = new_mol(R_NN,7/3, -i,i,left_right='R')
+            mol_props_R = new_mol(R_NN,exponent, -i,i,left_right='R')
             e_mol_R = mol_props_R[2]
             R_atom_p.append(e_mol_R)
 
-            mol_props_L = new_mol(L_NN,7/3, -i,i,left_right='L')
+            mol_props_L = new_mol(L_NN,exponent, -i,i,left_right='L')
             e_mol_L = mol_props_L[2]
             L_atom_p.append(e_mol_L)
             i  += step
