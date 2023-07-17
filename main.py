@@ -18,109 +18,188 @@ from scipy.optimize import curve_fit
 import numpy.fft as fft
 from scipy.signal import find_peaks
 from scipy.stats import pearsonr
+from m_modules import energy
 from m_modules.energy import *
 from m_modules.config import *
-import json
-# uncontracted cc-pvdz
+from m_modules.plots import *
+import scipy
+from scipy.fftpack import idct, idst
+from scipy.signal import unit_impulse as dirac_delta
+exponent = round(2.33, 2)
+step = 0.1
+def initiate(atomic_number):
+    max_lam = atomic_number
+    steps =  int(atomic_number / step  + 1)
+    d = 2.1
+    energy.max_lam, energy.steps, energy.step, energy.exponent, energy.d = max_lam, steps, step, exponent, d
+    # return_max_lam_steps() # ensures a 0.1 step size
 
-max_lam, steps, step, exponent = return_max_lam_steps() # ensures a 0.1 step size
+    NN = gto.M(atom= f"{atomic_number} 0 0 0; {atomic_number} 0 0 {d}",unit="Bohr",basis='unc-ccpvdz') # uncontracted cc-pvdz
+    mf_NN, e_NN = new_mol(NN, exponent, 0,0)[1],new_mol(NN,exponent, 0,0)[2]
+    CO, mf_CO, e_CO = new_mol(NN, exponent, -1,1)[:3]
+    BF, mf_BF, e_BF = new_mol(NN, exponent, -2,2) [:3]
 
-d = 2.1
-NN = gto.M(atom= f"N 0 0 0; N 0 0 {d}",unit="Bohr",basis='unc-ccpvdz')
-mf_NN, e_NN = new_mol(NN, exponent, 0,0)[1],new_mol(NN,exponent, 0,0)[2]
-CO, mf_CO, e_CO = new_mol(NN, exponent, -1,1)[:3]
-BF, mf_BF, e_BF = new_mol(NN, exponent, -2,2) [:3]
+    # e_BeNe, e_LiNa,e_HeMg, e_HAl, e_Si = new_mol(NN,exponent,-3,3)[2],new_mol(NN,exponent,-4,4)[2], new_mol(NN,exponent,-5,5)[2],\
+    #                                     new_mol(NN,exponent,-6,6)[2],new_mol(NN,exponent,-7,7)[2]
 
+    '''Data for max_lambda = 5 and = 7 is stored in data folder'''
+    ## Calculating actual fractional charge energies
 
-# e_BeNe, e_LiNa,e_HeMg, e_HAl, e_Si = new_mol(NN,exponent,-3,3)[2],new_mol(NN,exponent,-4,4)[2], new_mol(NN,exponent,-5,5)[2],\
-#                                     new_mol(NN,exponent,-6,6)[2],new_mol(NN,exponent,-7,7)[2]
+    # data = get_symmetric_change_data(0,max_lam,atomic_number)
+    data = get_symmetric_change_data(0,max_lam,atomic_number)
+    frac_energies,free_energies =  data[0], data[1]
 
-'''Data for max_lambda = 5 and = 7 is stored in data folder'''
-## Calculating actual fractional charge energies
+    '''getting / generating data for protonation'''
 
-gen = False
-data = get_symmetric_change_data(0,max_lam,gen)
-frac_energies,free_energies =  data[0], data[1]
+    # gen = False
+    # data = get_asymmetric_change_data(0,max_lam, gen)
+    # R_P,L_P = data[0],data[1]
 
-'''getting / generating data for protonation'''
-s = 0.94 # 0.5 angstroms or 0.94 Bohr.
-# gen = False
-# data = get_asymmetric_change_data(0,max_lam, gen)
-# R_P,L_P = data[0],data[1]
+    AG_NN = AG(mf_NN) # the alchemical gradient i.e. d_E / d_Z_I for where Z_I are N atoms
+    AG_CO = AG(mf_CO)
+    AG_BF = AG(mf_BF)
 
-AG_NN = AG(mf_NN) # the alchemical gradient i.e. d_E / d_Z_I for where Z_I are N atoms
-AG_CO = AG(mf_CO)
-AG_BF = AG(mf_BF)
+    # Evaluating the linearized energy gradient at lambda = 0. See argument fo d_Z_lambda in get_pred function in energy.py
+    pre_NN_l, pre_NN_nl = gen_data(NN,AG_NN,exponent,e_NN,0, max_lam)
+    pre_CO_l, pre_CO_nl = gen_data(CO,AG_CO,exponent,e_CO,-1, max_lam -1)
+    pre_BF_l, pre_BF_nl = gen_data(BF,AG_BF,exponent,e_BF,-2, max_lam -2)
+    prediction_7_3 = np.array([pre_NN_nl, pre_CO_nl, pre_BF_nl])
 
-# Evaluating the linearized energy gradient at lambda = 0. See argument fo d_Z_lambda in get_pred function in energy.py
-pre_NN_l, pre_NN_nl = gen_data(NN,AG_NN,exponent,e_NN,0, max_lam)
-pre_CO_l, pre_CO_nl = gen_data(CO,AG_CO,exponent,e_CO,-1, max_lam -1)
-pre_BF_l, pre_BF_nl = gen_data(BF,AG_BF,exponent,e_BF,-2, max_lam -2)
-prediction_7_3 = np.array([pre_NN_nl, pre_CO_nl, pre_BF_nl])
+    '''
+    Preparing prediction data for plotting for symmetrical alchemical changes for n in (0.5, 3) in steps of 0.1'''
+    '''
+    Structure of predictions_n:
+        predictions_n = [...,[pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n],...]
+        pre_NN_nl_n = non-linear Z prediction over all lambda at n from NN
+    '''
+    # predictions_n = []
+    # for n in np.linspace(0.5,5,46):
+    #     pre_NN_nl_n = gen_data(NN,AG_NN,n,e_NN,0, max_lam)[1]
+    #     pre_CO_nl_n = gen_data(CO,AG_CO,n,e_CO,-1, max_lam -1)[1]
+    #     pre_BF_nl_n = gen_data(BF,AG_BF,n,e_BF,-2, max_lam -2)[1]
+    #     predictions_n.append(np.array([pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n]))
+    # predictions_n = np.array(predictions_n)
+    # prediction_2 = predictions_n[15]
 
-'''
-Preparing prediction data for plotting for symmetrical alchemical changes for n in (0.5, 3) in steps of 0.1'''
-'''
-Structure of predictions_n:
-    predictions_n = [...,[pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n],...]
-    pre_NN_nl_n = non-linear Z prediction over all lambda at n from NN
-'''
-# predictions_n = []
-# for n in np.linspace(0.5,5,46):
-#     pre_NN_nl_n = gen_data(NN,AG_NN,n,e_NN,0, max_lam)[1]
-#     pre_CO_nl_n = gen_data(CO,AG_CO,n,e_CO,-1, max_lam -1)[1]
-#     pre_BF_nl_n = gen_data(BF,AG_BF,n,e_BF,-2, max_lam -2)[1]
-#     predictions_n.append(np.array([pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n]))
-# predictions_n = np.array(predictions_n)
-# prediction_2 = predictions_n[15]
+    # fitting errors only upto a certain lambda
+    max_lam_err = max_lam
+    # store difference between numpy arrays of size (51,) and (3,71) in a numpy array of size (3,51) in one line
+    prediction = prediction_7_3
+    pre_restricted = np.array([ prediction[i][:max_lam_err*int(1/step) + 1] for i in range(3)])
+    dft_pred_restricted = frac_energies[:max_lam_err*int(1/step) + 1]
+    '''Defining the total x_axis'''
+    x_axis = np.linspace(0,max_lam,steps)
 
-# fitting errors only upto a certain lambda
-max_lam_err = 7
-# store difference between numpy arrays of size (51,) and (3,71) in a numpy array of size (3,51) in one line
-prediction = prediction_7_3
-pre_2_restricted = np.array([ prediction[i][:max_lam_err*10 + 1] for i in range(3)])
-dft_pred_restricted = np.array([ frac_energies[:max_lam_err*10 + 1] for i in range(3)])
-'''Defining the total x_axis'''
-x_axis = np.linspace(0,max_lam,steps + 1)
+    '''Defining the new x axis for fitting errors'''
+    x_axis_err = reflect(x_axis[:max_lam_err*int(1/step) + 1],-1)
+    '''Fitting away 2nd order errors'''
+    quad_err = reflect(dft_pred_restricted - pre_restricted)
+    # quad_err = dft_pred_restricted - prediction_7_3[:,:max_lam_err*int(1/step) + 1]
+    err_fits = [] # across the whole x-axis
+    err_res_fits = [] # across restricted x-axis
+    # fitting for only equi. diatomic
+    fit = quad_fit
+    for i in range(1):
+        popt_, pcov_ = curve_fit(fit, x_axis_err, quad_err[i],absolute_sigma=True,maxfev=100000)
+        err_res_fits.append(np.array(fit(x_axis_err, *popt_)))
+        err_fits.append(np.array(fit(reflect(x_axis,-1), *popt_)))
 
-'''Defining the new x axis for fitting errors'''
-x_axis_err = x_axis[:max_lam_err*10 + 1]
+    quad_adjusted_prediction = reflect(prediction) + np.array(err_fits)
+    quad_adjusted_pre_restriced = reflect(pre_restricted) + np.array(err_res_fits)
+    # np.array([quad_adjusted_prediction[i][max_lam_err*int(1/step):2*max_lam_err*int(1/step) + 1] for i in range(3)])
 
-'''Fitting away 2nd order errors'''
-quad_err = dft_pred_restricted - pre_2_restricted
-# quad_err = dft_pred_restricted - prediction_7_3[:,:max_lam_err*10 + 1]
-err_fits = []
-for i in range(3):
-    popt_, pcov_ = curve_fit(quad_fit, x_axis_err, quad_err[i],absolute_sigma=True,maxfev=100000)
-    fitted_err_ = np.array(quad_fit(x_axis, *popt_))
-    err_fits.append(fitted_err_)
-
-quad_adjusted_prediction = prediction + np.array(err_fits)
-quad_adjusted_pre_restriced = np.array([quad_adjusted_prediction[i][:max_lam_err*10 + 1] for i in range(3)])
-
-# plotting error between actual and prediction
-comps = ['NN','CO','BF']
-def plot_quad_errors():
-    # SHOULD PLOT BOTH INITIAL ERROR AND ERROR AFTER FITTING AWAY QUADRATIC ERRORS
-    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
+    # plotting error between actual and prediction
+    comps = []
     for i in range(3):
-        # plt.scatter(x_axis, quart_err[i], label = 'actual err')
-        # plt.scatter(x_axis_err,(dft_pred_restricted-quad_adjusted_pre_restriced)[i], label = 'quad adjusted err')
-        ax[0].scatter(x_axis, frac_energies - prediction[i], label = f'err for {comps[i]} pre')
-        ax[0].plot(x_axis, err_fits[i],label = 'quad err fit')
-        # ax[1].scatter(x_axis, quart_err[i], label = 'actual err')
-        # ax[1].scatter(x_axis_err,(dft_pred_restricted-quad_adjusted_pre_restriced)[i], label = i)
-        ax[1].scatter(x_axis, frac_energies - quad_adjusted_prediction[i], label = f'{comps[i]} quad corrected pre.')
+        comps.append(get_mol_symbol(atomic_number, i,-i))
+    fig1 = plot_pol_errors(fit.__name__,x_axis_err ,reflect(dft_pred_restricted),\
+        reflect(pre_restricted),\
+            quad_adjusted_pre_restriced , comps, atomic_number)
+
+    h_real_n ,f_real_n, A_real,p_real_p, n_real_p,fft_real = FT(reflect(dft_pred_restricted),quad_adjusted_pre_restriced, max_lam_err, comps,atomic_number)
+    print('All good')
+    correction = closed_form(x_axis_err,h_real_n ,f_real_n, A_real,p_real_p, n_real_p)
+    subplots = 2
+    fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
+    ax[0].plot(fft.ifft(fft.ifftshift(fft_real)), label='inverse fft')
+    ax[1].plot(correction, label='correction')
     ax[0].legend()
-    # ax[0].set_ylabel('dft - prediction in Ha.')
-    ax[0].set_title('Error between actual and prediction')
-    ax[1].set_title('Error after adjusting for quadratic error')
-    ax[1].set_xlabel('lambda')
     ax[1].legend()
-    fig.text(0.04, 0.5, 'Error in Ha.', va='center', rotation='vertical',size=20)
+
+
+
+def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
+    err = actual - new_prediction
+    subplots = 2
+    fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
+    imag_peak_freqs = []
+    imag_peak_heights = []
+
+    # put 1 to only plot error from equilibrium diatomic.
+    # for i in range(1):
+    i = 0
+    data = err[i][:-1]
+    N = len(data)  # Number of data points
+    normalization = 1   # Normalization factor
+    fft_data = normalization * fft.fftshift(fft.fft(data))
+    fft_sine_data = fft.fftshift(normalization * scipy.fft.dst(data))[N//2:]
+    fft_cos_data = fft.fftshift(normalization * scipy.fft.dct(data))[N//2:]
+
+    print(check_even(fft_data[1:]))
+    # Compute the frequencies
+    frequencies = fft.fftshift(fft.fftfreq(N, d = step))
+
+    # plot only half of the frequencies
+    frequencies = frequencies[N//2:]
+    fft_data = fft_data[N//2:]
+
+
+
+    ax[0].plot(frequencies, np.real(fft_data),label=comps[i]) #,  label=f'{frequencies[peaks_r[0]]} {peaks_r[1]}'
+
+
+     # # finding peaks for feeding curve-fit parameters
+    # positive peaks
+    # def fitting():
+    peaks_r = find_peaks(np.real(fft_data), height = 0.01)
+    real_peak_freq = frequencies[peaks_r[0][0]]
+    real_peak_height = peaks_r[1]['peak_heights'][0]
+
+    # negative peaks
+    peaks_r_n = find_peaks(-np.real(fft_data)[:7], height = 2e-3)
+    real_peak_freq_n = frequencies[peaks_r_n[0][0]]
+    real_peak_height_n = -peaks_r_n[1]['peak_heights'][0]
+
+    fit_func = exp
+
+    p0r = (real_peak_height, real_peak_freq,-1)
+    popt_r, pcov_r = curve_fit(fit_func, frequencies[peaks_r[0][0]:], np.real(fft_data)[peaks_r[0][0]:],\
+        p0 = p0r, bounds = ((real_peak_height,real_peak_freq,-np.inf),(real_peak_height*1.001,real_peak_freq*1.001,0)))
+
+    real_fit = fit_func(frequencies[peaks_r[0][0]:], *popt_r)
+
+    ax[0].plot(frequencies[peaks_r[0][0]:], real_fit)
+    ax[0].plot(real_peak_freq_n, real_peak_height_n, 'ro', label=f'neg peak {real_peak_freq_n}')
+
+    # fitting()
+
+    # ax[1].plot(imag_peak_freq_n, imag_peak_height_n, 'ro', label=f'neg peak {imag_peak_freq_n}')
+    # ax[1].plot(frequencies[peaks_i[0][0]:], imag_fit)
+    ax[1].plot(frequencies, fft_sine_data,label=comps[i]) # , label=f'{frequencies[peaks_i[0]]} {peaks_i[1]}'
+
+    ax[1].set_xlabel('Frequency')
+    ax[1].set_title(f'Imaginary comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = {max_lam_err} @ n={exponent}\
+        for {get_element_symbol(atomic_number)}-{get_element_symbol(atomic_number)}')
+    ax[0].set_title(f'Real comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = {max_lam_err} @ n={exponent} ')
+    ax[0].legend()
+    ax[1].legend()
+    fig.text(0.04, 0.5, 'amplitude', va='center', rotation='vertical',size=20)
     plt.show()
 
-'''Fititng quarttic error'''
+    return real_peak_height_n,real_peak_freq_n, *popt_r, np.real(normalization * fft.fftshift(fft.fft(data)))
+
+
+'''Fitting quarttic error'''
 def perform_quart_err_correction():
     quart_err = dft_pred_restricted - quad_adjusted_pre_restriced
     fits = []
@@ -130,27 +209,9 @@ def perform_quart_err_correction():
         fits.append(fitted_err_)
 
     quart_adjusted_prediction = quad_adjusted_prediction +np.array(fits)
-    quart_adjusted_pre_restriced = np.array([quart_adjusted_prediction[i][:max_lam_err*10 + 1] for i in range(3)])
+    quart_adjusted_pre_restriced = np.array([quart_adjusted_prediction[i][:max_lam_err*int(1/step) + 1] for i in range(3)])
 
-    plot_quartic_errors(quad_adjusted_prediction, quart_adjusted_prediction)
-
-def plot_quartic_errors(prev_pred, new_pred):
-    # plotting error between actual and quad adjusted
-    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-
-    for i in range(3):
-        # plt.scatter(x_axis, quart_err[i], label = 'actual err')
-        # plt.scatter(x_axis_err,(dft_pred_restricted-quart_adjusted_pre_restriced)[i], label = 'quart adjusted err')
-        ax[0].scatter(x_axis, frac_energies - prev_pred[i], label = f'err for {comps[i]} pre')
-        ax[0].plot(x_axis, new_pred[i] - quad_adjusted_prediction[i], label = f'fits for {comps[i]} err')
-        ax[1].scatter(x_axis, frac_energies - new_pred[i], label = f'for {comps[i]}')
-    ax[0].set_title('Error before adjusting for quartic error')
-    ax[1].set_title('Error after adjusting for quartic error')
-    ax[0].legend()
-    ax[1].legend()
-    ax[1].set_xlabel(r'$\lambda$')
-    fig.text(0.04, 0.5, 'Error in Ha.', va='center', rotation='vertical',size=20)
-    plt.show()
+    plot_pol_errors(quad_adjusted_prediction, quart_adjusted_prediction,'quartic')
 
 def plot_predictions():
     '''Plotting graph with linear and non-linear grads for symmetrical alchemical changes'''
@@ -188,57 +249,6 @@ def plot_predictions():
     ax2.set_xticklabels(['NN','CO','BF','BeNe','LiNa','HeMg','HAl','Si'])
     plt.show()
     plt.savefig('data/figs/main_prediction_plot.png')
-
-def FT():
-    err = dft_pred_restricted - quad_adjusted_pre_restriced
-    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-    for i in range(3):
-        data = err[i]
-        N = len(data)  # Number of data points
-        normalization = 2 / N
-        fft_data = normalization * np.fft.fft(data)
-        # Compute the frequencies
-        frequencies = np.fft.fftfreq(N, d = 0.1)
-
-        # Shift the frequencies to have 0 at the center
-        frequencies = np.fft.fftshift(frequencies)[N//2:]
-        fft_data = np.fft.fftshift(fft_data)[N//2:]
-
-        # finding peaks for feeding curve-fit parameters
-        peaks_r = find_peaks(np.real(fft_data), height = 0.05)
-        peaks_i = find_peaks(np.imag(fft_data), height = (0.10,0.15))
-
-        # fitting the fourier transforms
-        # print(np.real(fft_data)[peaks_r[0][0]:])
-        # real p0 for x_n = [0.1,.7, -3.1 , -0.02]
-        # real p0 for exp = [1.4,1., -2.1 , -0.02]
-        p0r = [1.4,1., -2.1]
-        popt_r, pcov_r = curve_fit(exp, frequencies[peaks_r[0][0]:], np.real(fft_data)[peaks_r[0][0]:],\
-            p0 = p0r)
-        real_fit = exp(frequencies[peaks_r[0][0]:], *popt_r)
-
-        # imag p0 for x_n = [1.5,2, -3.2 , 0.01]
-        # imag p0 for exp = [0.6,.7, -1.4 , 0.01]
-        p0i = [0.6,.7, -1.4]
-        popt_i, pcov_i = curve_fit(exp, frequencies[peaks_i[0][0]:], np.imag(fft_data)[peaks_i[0][0]:],\
-            p0 = p0i)
-        imag_fit = exp(frequencies[peaks_i[0][0]:], *popt_i)
-
-        # Plot the Fourier transform
-        if i==0:
-            print(f'{popt_r} \n {popt_i}')
-            ax[0].plot(frequencies[peaks_r[0][0]:], real_fit,  label=f'fit from peak')
-            ax[1].plot(frequencies[peaks_i[0][0]:], imag_fit,  label=f'fit from peak')
-        ax[0].plot(frequencies, np.real(fft_data),  label=f'{frequencies[peaks_r[0]]} {peaks_r[1]}')
-        ax[1].plot(frequencies, np.imag(fft_data), label=f'{frequencies[peaks_i[0]]} {peaks_i[1]}')
-
-    ax[1].set_xlabel('Frequency')
-    ax[1].set_title('Imaginary comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = 7 @ n=2')
-    ax[1].legend()
-    ax[0].set_title('Real comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = 7 @ n=2 ')
-    ax[0].legend()
-    fig.text(0.04, 0.5, 'amplitude', va='center', rotation='vertical',size=20)
-    plt.show()
 
 def finite_fourier_fit():
     # fitting the eror after adjusting quadratic error.
@@ -318,7 +328,7 @@ def all_models_all_errs():
     # fig.suptitle(r'Errors for different n where $Z(\lambda) = (Z_i^n + \lambda (Z_f^n-Z_i^n))^{\frac{1}{n}}$', fontsize=25)
 
 def final_err():
-    x_axis = np.linspace(0,max_lam,steps + 1)
+    x_axis = np.linspace(0,max_lam,steps)
     err = np.abs(frac_energies - get_fourier_pred(3)[0])
     for i in range(3):
         plt.plot(x_axis,err[i],label=f'for {comps[i]} pred')

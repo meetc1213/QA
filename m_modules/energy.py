@@ -12,8 +12,23 @@ from g_modules.FcMole import FcM, FcM_like
 from g_modules.AP_class import APDFT_perturbator as AP
 from g_modules.alch_deriv import first_deriv_elec,DeltaV
 from m_modules.config import *
+import os
+import periodictable
 
-max_lam, steps, step, exponent = return_max_lam_steps()
+max_lam, steps, step, exponent,d = 1,1,1,1,1
+
+def is_file_in_folder(folder_path, file_name):
+    file_path = os.path.join(folder_path, file_name)
+    return os.path.isfile(file_path)
+
+def get_element_symbol(atomic_number):
+    element = periodictable.elements[atomic_number]
+    return element.symbol
+
+def get_mol_symbol(equi_Z, l_1, l_2):
+    element1 = get_element_symbol(equi_Z+l_1)
+    element2 = get_element_symbol(equi_Z+l_2)
+    return element1 + element2
 
 def get_free_energy(mol_i, n):
     '''takes a molecule and the power of the free energy term and returns the free energy'''
@@ -78,20 +93,23 @@ def gen_data(mol,AG,n,e_mol,l_i, l_f):
     # generates linear and non linear prediction data
     l_pre = []
     nl_pre = []
-    for i in np.linspace(l_i,l_f, steps + 1):
+    for i in np.linspace(l_i,l_f, steps):
         pre = get_pred(mol, AG,n, e_mol, i,i)
         l_pre.append(pre[0])
         nl_pre.append(pre[1])
     return np.array(l_pre), np.array(nl_pre)
 
 '''wrapper function for generating DFT data'''
-def get_symmetric_change_data(min_lam,max_lam, gen=False):
+def get_symmetric_change_data(min_lam,max_lam,atomic_number):
     # gets ANM1 data
-    if gen:
+    folder_path = f'data/step={round(step,2)}/'
+    file_name = f'{atomic_number}_{step}_dft_0_to_{max_lam}.csv'
+    if not is_file_in_folder(folder_path, file_name):
         frac_energies = []
         free_energies = []
         i = min_lam
         while round(i,3) <= max_lam:
+            NN = gto.M(atom= f"{atomic_number} 0 0 0; {atomic_number} 0 0 {d}",unit="Bohr",basis='unc-ccpvdz')
             mol_props = new_mol(NN,exponent, -i,i)
             e_mol = mol_props[2]
             free_e = mol_props[3]
@@ -100,12 +118,13 @@ def get_symmetric_change_data(min_lam,max_lam, gen=False):
             i  += step
         frac_energies = np.array(frac_energies)
         free_energies = np.array(free_energies)
-        np.savetxt(f"data/dft_0_to_{max_lam}.csv",[frac_energies,free_energies])
+        np.savetxt(f"{folder_path}{file_name}",[frac_energies,free_energies])
 
-    return np.loadtxt(f'data/dft_0_to_{max_lam}.csv')
+    return np.loadtxt(f'{folder_path}{file_name}')
 
 def get_asymmetric_change_data(min_lam,max_lam, gen=False):
     # gets the protnation data
+    s = 0.94 # 0.5 angstroms or 0.94 Bohr.
     if gen:
         R_NN = gto.M(atom= f"N 0 0 0; N 0 0 {d}; H 0 0 {d+s}",unit="Bohr",charge=1,basis='unc-ccpvdz')
         L_NN = gto.M(atom= f"H 0 0 {-s}; N 0 0 0; N 0 0 {d}",unit="Bohr",charge=1,basis='unc-ccpvdz')

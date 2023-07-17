@@ -1,3 +1,9 @@
+
+import matplotlib.pyplot as plt
+from matplotlib.pyplot import figure
+from m_modules import energy
+from m_modules.energy import *
+
 def l_nl_plot():
     l_vals = np.array([np.array(x) for x in [pre_NN_l,pre_CO_l,pre_BF_l]])
     l_keys = ['L. Z @ NN', 'L. Z @ CO','L. Z @ BF']
@@ -31,3 +37,23 @@ def l_nl_plot():
     ax2 = ax.twiny()
     ax2.set_xlim(ax.get_xlim())
     ax2.set_xticklabels(['NN','CO','BF','BeNe','LiNa','HeMg','HAl','Si'])
+
+def plot_pol_errors(name, x_axis,actual, prev_pred, new_pred,\
+                    comps, atomic_number):
+    '''
+    function to plot error before and after a correction
+    '''
+    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
+    # put 1 to only plot error from equilibrium diatomic.
+    for i in range(1):
+        ax[0].scatter(x_axis, actual - prev_pred[i], label = f'err for {comps[i]} pre')
+        ax[0].plot(x_axis, new_pred[i] - prev_pred[i], label = f'fits for {comps[i]} err')
+        ax[1].scatter(x_axis, actual - new_pred[i], label = f'for {comps[i]}')
+    ax[0].set_title(f'Error before adjusting for {name} error')
+    ax[1].set_title(f'Error after adjusting for {name} error')
+    ax[0].legend()
+    ax[1].legend()
+    ax[1].set_xlabel(r'$\lambda$')
+    fig.text(0.04, 0.5, 'Error in Ha.', va='center', rotation='vertical',size=20)
+    fig.suptitle(f'Error for total electrons from {get_element_symbol(atomic_number)}-{get_element_symbol(atomic_number)}',size=20)
+    return fig
