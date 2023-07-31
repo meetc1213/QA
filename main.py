@@ -25,14 +25,13 @@ from m_modules.plots import *
 import scipy
 from scipy.fftpack import idct, idst
 from scipy.signal import unit_impulse as dirac_delta
-exponent = round(2.33, 2)
+exponent = round(2, 2)
 step = 0.1
 def initiate(atomic_number):
     max_lam = atomic_number
     steps =  int(atomic_number / step  + 1)
     d = 2.1
     energy.max_lam, energy.steps, energy.step, energy.exponent, energy.d = max_lam, steps, step, exponent, d
-    # return_max_lam_steps() # ensures a 0.1 step size
 
     NN = gto.M(atom= f"{atomic_number} 0 0 0; {atomic_number} 0 0 {d}",unit="Bohr",basis='unc-ccpvdz') # uncontracted cc-pvdz
     mf_NN, e_NN = new_mol(NN, exponent, 0,0)[1],new_mol(NN,exponent, 0,0)[2]
@@ -86,52 +85,75 @@ def initiate(atomic_number):
     # store difference between numpy arrays of size (51,) and (3,71) in a numpy array of size (3,51) in one line
     prediction = prediction_7_3
     pre_restricted = np.array([ prediction[i][:max_lam_err*int(1/step) + 1] for i in range(3)])
-    dft_pred_restricted = frac_energies[:max_lam_err*int(1/step) + 1]
+    dft_restricted = frac_energies[:max_lam_err*int(1/step) + 1]
     '''Defining the total x_axis'''
     x_axis = np.linspace(0,max_lam,steps)
 
     '''Defining the new x axis for fitting errors'''
     x_axis_err = reflect(x_axis[:max_lam_err*int(1/step) + 1],-1)
     '''Fitting away 2nd order errors'''
-    quad_err = reflect(dft_pred_restricted - pre_restricted)
-    # quad_err = dft_pred_restricted - prediction_7_3[:,:max_lam_err*int(1/step) + 1]
+    first_order_err = reflect(dft_restricted - pre_restricted)
+    # first_order_err = dft_restricted - prediction_7_3[:,:max_lam_err*int(1/step) + 1]
     err_fits = [] # across the whole x-axis
     err_res_fits = [] # across restricted x-axis
     # fitting for only equi. diatomic
-    fit = quad_fit
+    fit = gaussian_fit
     for i in range(1):
-        popt_, pcov_ = curve_fit(fit, x_axis_err, quad_err[i],absolute_sigma=True,maxfev=100000)
+        popt_, pcov_ = curve_fit(fit, x_axis_err, first_order_err[i],absolute_sigma=True,maxfev=100000)
         err_res_fits.append(np.array(fit(x_axis_err, *popt_)))
         err_fits.append(np.array(fit(reflect(x_axis,-1), *popt_)))
 
-    quad_adjusted_prediction = reflect(prediction) + np.array(err_fits)
-    quad_adjusted_pre_restriced = reflect(pre_restricted) + np.array(err_res_fits)
-    # np.array([quad_adjusted_prediction[i][max_lam_err*int(1/step):2*max_lam_err*int(1/step) + 1] for i in range(3)])
+    quad_adjusted_pre = reflect(prediction) + np.array(err_fits)
+    quad_adjusted_pre_res = reflect(pre_restricted) + np.array(err_res_fits)
+    # np.array([quad_adjusted_pre[i][max_lam_err*int(1/step):2*max_lam_err*int(1/step) + 1] for i in range(3)])
 
     # plotting error between actual and prediction
     comps = []
     for i in range(3):
         comps.append(get_mol_symbol(atomic_number, i,-i))
-    fig1 = plot_pol_errors(fit.__name__,x_axis_err ,reflect(dft_pred_restricted),\
-        reflect(pre_restricted),\
-            quad_adjusted_pre_restriced , comps, atomic_number)
 
-    h_real_n ,f_real_n, A_real,p_real_p, n_real_p,fft_real = FT(reflect(dft_pred_restricted),quad_adjusted_pre_restriced, max_lam_err, comps,atomic_number)
-    print('All good')
-    correction = closed_form(x_axis_err,h_real_n ,f_real_n, A_real,p_real_p, n_real_p)
-    subplots = 2
-    fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
-    ax[0].plot(fft.ifft(fft.ifftshift(fft_real)), label='inverse fft')
-    ax[1].plot(correction, label='correction')
-    ax[0].legend()
-    ax[1].legend()
+
+    h_real_n ,f_real_n, A_real,f_real_p, n_real_p, arr_fft,inv_fft = FT(reflect(dft_restricted),quad_adjusted_pre_res, max_lam_err, comps,atomic_number)
+
+    fig1 = plot_errors(fit.__name__,x_axis_err ,reflect(dft_restricted),\
+        reflect(pre_restricted),\
+            quad_adjusted_pre_res , comps, atomic_number)
+
+    second_order_err = reflect(dft_restricted) - quad_adjusted_pre_res
+
+    my_params = [-2.63982116e-02 , 4.03299727e-02 , 2.52607851e-01,  0,0,0]
+    manual_fit = beat(x_axis_err,*my_params)
+
+    err_fits = [] # across the whole x-axis
+    err_res_fits = [] # across restricted x-axis
+    for i in range(1):
+        popt_, pcov_ = curve_fit(beat, x_axis_err, second_order_err[i],absolute_sigma=True,maxfev=100000,\
+            p0 =my_params) #  (A_real, f_real_p,f_real_n,0, 0)
+        err_res_fits.append(np.array(beat(x_axis_err, *popt_)))
+        err_fits.append(np.array(beat(reflect(x_axis,-1), *popt_)))
+    print(popt_)
+    product_sines_pre = quad_adjusted_pre + np.array(err_fits)
+    product_sines_pre_res =  quad_adjusted_pre_res + np.array(err_res_fits)
+
+    fig1 = plot_errors(beat.__name__,x_axis_err ,reflect(dft_restricted),\
+        quad_adjusted_pre_res , product_sines_pre_res,comps, atomic_number, manual_fit)
+
+    plt.show()
+    # correction = closed_form(x_axis_err,h_real_n ,f_real_n, A_real,f_real_p, n_real_p)
+    # subplots = 2
+    # fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
+    # ax[0].plot(inv_fft, label='inverse fft')
+    # ax[0].plot(arr_fft, label=' arr fft')
+    # ax[1].plot(correction, label='correction')
+    # ax[0].legend()
+    # ax[1].legend()
 
 
 
 def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
     err = actual - new_prediction
-    subplots = 2
-    fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
+    subplots = 1
+    fig, ax = plt.subplots(subplots, 1, figsize=(2*5*subplots, 5*subplots), sharex=True)
     imag_peak_freqs = []
     imag_peak_heights = []
 
@@ -141,77 +163,74 @@ def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
     data = err[i][:-1]
     N = len(data)  # Number of data points
     normalization = 1   # Normalization factor
-    fft_data = normalization * fft.fftshift(fft.fft(data))
+    fft_data = np.real(normalization * fft.rfft(data))
     fft_sine_data = fft.fftshift(normalization * scipy.fft.dst(data))[N//2:]
     fft_cos_data = fft.fftshift(normalization * scipy.fft.dct(data))[N//2:]
 
-    print(check_even(fft_data[1:]))
     # Compute the frequencies
-    frequencies = fft.fftshift(fft.fftfreq(N, d = step))
+    frequencies = (fft.rfftfreq(N, d = 1))
+    if np.sum(np.imag(normalization * fft.rfft(data))) < 0.0001:
+        print('Imaginary part is negligible')
 
     # plot only half of the frequencies
-    frequencies = frequencies[N//2:]
-    fft_data = fft_data[N//2:]
-
-
-
-    ax[0].plot(frequencies, np.real(fft_data),label=comps[i]) #,  label=f'{frequencies[peaks_r[0]]} {peaks_r[1]}'
-
-
+    # frequencies = frequencies[N//2:]
+    # fft_data = fft_data[N//2:]
+    ax.scatter(frequencies[:50], fft_data[:50],label=comps[i]) #,  label=f'{frequencies[peaks_r[0]]} {peaks_r[1]}'
      # # finding peaks for feeding curve-fit parameters
     # positive peaks
     # def fitting():
-    peaks_r = find_peaks(np.real(fft_data), height = 0.01)
+    peaks_r = find_peaks(fft_data, height = 0.6)
     real_peak_freq = frequencies[peaks_r[0][0]]
     real_peak_height = peaks_r[1]['peak_heights'][0]
-
     # negative peaks
-    peaks_r_n = find_peaks(-np.real(fft_data)[:7], height = 2e-3)
+
+    peaks_r_n = find_peaks(-fft_data[:10], height = 2e-3)
     real_peak_freq_n = frequencies[peaks_r_n[0][0]]
     real_peak_height_n = -peaks_r_n[1]['peak_heights'][0]
 
     fit_func = exp
 
     p0r = (real_peak_height, real_peak_freq,-1)
-    popt_r, pcov_r = curve_fit(fit_func, frequencies[peaks_r[0][0]:], np.real(fft_data)[peaks_r[0][0]:],\
+    popt_r, pcov_r = curve_fit(fit_func, frequencies[peaks_r[0][0]:], fft_data[peaks_r[0][0]:],\
         p0 = p0r, bounds = ((real_peak_height,real_peak_freq,-np.inf),(real_peak_height*1.001,real_peak_freq*1.001,0)))
 
     real_fit = fit_func(frequencies[peaks_r[0][0]:], *popt_r)
 
-    ax[0].plot(frequencies[peaks_r[0][0]:], real_fit)
-    ax[0].plot(real_peak_freq_n, real_peak_height_n, 'ro', label=f'neg peak {real_peak_freq_n}')
+    # ax.plot(frequencies[peaks_r[0][0]:], real_fit)
+    # ax.plot(real_peak_freq_n, real_peak_height_n, 'ro', label=f'neg peak {real_peak_freq_n}')
 
     # fitting()
 
-    # ax[1].plot(imag_peak_freq_n, imag_peak_height_n, 'ro', label=f'neg peak {imag_peak_freq_n}')
-    # ax[1].plot(frequencies[peaks_i[0][0]:], imag_fit)
-    ax[1].plot(frequencies, fft_sine_data,label=comps[i]) # , label=f'{frequencies[peaks_i[0]]} {peaks_i[1]}'
+    ax.set_title(f'Real comp. of Fourier Transform of first order correction  \n till lambda = {max_lam_err} @ n={exponent} ')
 
-    ax[1].set_xlabel('Frequency')
-    ax[1].set_title(f'Imaginary comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = {max_lam_err} @ n={exponent}\
-        for {get_element_symbol(atomic_number)}-{get_element_symbol(atomic_number)}')
-    ax[0].set_title(f'Real comp. of Fourier Transform of Actual - Quadratic global correction  \n till lambda = {max_lam_err} @ n={exponent} ')
-    ax[0].legend()
-    ax[1].legend()
+
     fig.text(0.04, 0.5, 'amplitude', va='center', rotation='vertical',size=20)
-    plt.show()
 
-    return real_peak_height_n,real_peak_freq_n, *popt_r, np.real(normalization * fft.fftshift(fft.fft(data)))
+
+    # preparing a new fft for checking
+    array = np.zeros(len(fft_data))
+    array[peaks_r_n[0][0]] = real_peak_height_n
+    array[peaks_r[0][0]:] = real_fit # fft_data[peaks_r[0][0]:]
+    # print(array)
+    # ax.scatter(frequencies, array,label='Array fft')
+    ax.legend()
+    plt.show()
+    return real_peak_height_n,real_peak_freq_n, *popt_r, fft.irfft(array), fft.irfft(fft_data)
 
 
 '''Fitting quarttic error'''
 def perform_quart_err_correction():
-    quart_err = dft_pred_restricted - quad_adjusted_pre_restriced
+    quart_err = dft_restricted - quad_adjusted_pre_res
     fits = []
     for i in range(3):
         popt_, pcov_ = curve_fit(quart_fit, x_axis_err, quart_err[i],absolute_sigma=True)
         fitted_err_ = np.array(quart_fit(x_axis, *popt_))
         fits.append(fitted_err_)
 
-    quart_adjusted_prediction = quad_adjusted_prediction +np.array(fits)
+    quart_adjusted_prediction = quad_adjusted_pre +np.array(fits)
     quart_adjusted_pre_restriced = np.array([quart_adjusted_prediction[i][:max_lam_err*int(1/step) + 1] for i in range(3)])
 
-    plot_pol_errors(quad_adjusted_prediction, quart_adjusted_prediction,'quartic')
+    plot_pol_errors(quad_adjusted_pre, quart_adjusted_prediction,'quartic')
 
 def plot_predictions():
     '''Plotting graph with linear and non-linear grads for symmetrical alchemical changes'''
@@ -252,7 +271,7 @@ def plot_predictions():
 
 def finite_fourier_fit():
     # fitting the eror after adjusting quadratic error.
-    err_to_fit = dft_pred_restricted - quad_adjusted_pre_restriced
+    err_to_fit = dft_restricted - quad_adjusted_pre_res
 
     def get_fourier_pred(N):
         '''Gets the lambda dependent fourier prediction upto Nth order for the error after adjusting the quadratic error.'''
@@ -269,7 +288,7 @@ def finite_fourier_fit():
             fits.append(funcs[N-1](x_axis,*popt))
             # print(f'b is {popt[0]} for {comps[j]}')
             popts.append(np.array(popt))
-        return quad_adjusted_prediction + np.array(fits), np.array(popts)
+        return quad_adjusted_pre + np.array(fits), np.array(popts)
 
     for i in range(5):
         popts = get_fourier_pred(i+1)[1]
@@ -283,10 +302,10 @@ def finite_fourier_fit():
 
     # to check whether the fits accurately model the error
     for i in range(3):
-        plt.scatter(x_axis, frac_energies - quad_adjusted_prediction[i], label = f'quad err for {comps[i]}')
-        plt.plot(x_axis, (get_fourier_pred(1)[0]-quad_adjusted_prediction)[i], label = '1 fourier term')
-        plt.plot(x_axis, (get_fourier_pred(2)[0]-quad_adjusted_prediction)[i], label = '2 fourier term')
-        plt.plot(x_axis, (get_fourier_pred(3)[0]-quad_adjusted_prediction)[i], label = '3 fourier term')
+        plt.scatter(x_axis, frac_energies - quad_adjusted_pre[i], label = f'quad err for {comps[i]}')
+        plt.plot(x_axis, (get_fourier_pred(1)[0]-quad_adjusted_pre)[i], label = '1 fourier term')
+        plt.plot(x_axis, (get_fourier_pred(2)[0]-quad_adjusted_pre)[i], label = '2 fourier term')
+        plt.plot(x_axis, (get_fourier_pred(3)[0]-quad_adjusted_pre)[i], label = '3 fourier term')
         # plt.plot(x_axis, ff(x_axis, *[ 2.19714862e-02,  1.70264763e+00 ,-11.10,  1.07301660e+00,7.97399174e-03]),label='Real')
     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     plt.xlabel('Lambda')
@@ -299,7 +318,7 @@ def all_models_all_errs():
     '''PLotting all the errors for the different models'''
     comps = ['NN', 'CO', 'BF']
     error_funcs = [rmse, max_error, mae, std]
-    models = [quad_adjusted_prediction, \
+    models = [quad_adjusted_pre, \
         quart_adjusted_prediction, get_fourier_pred(1)[0], get_fourier_pred(2)[0]]
     labels = ['quad adj.', 'quart adj.', 'fourier 1', 'fourier 2']
     all_errors = []

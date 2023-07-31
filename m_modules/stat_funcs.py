@@ -66,8 +66,8 @@ def quart_fit(x,a,b,c,d,e):
 def quin_fit(x,a,b,c,d,e,f):
     return a*x**5 + b*x**4 + c*x**3 + d*x**2 + e*x + f
 
-def gaussian_fit(x,a,c,d):
-    return a*np.exp(-(x)**2/(2*c**2)) + d
+def gaussian_fit(x,a,b,c):
+    return a*np.exp(-(x)**2/(2*b**2)) + c
 
 def power_sine(x, b,A, f, p):
     return x**b + x*A*np.sin(f*x + p)
@@ -97,7 +97,21 @@ def power(freq, A,b, offset,n):
     return A*b**((freq+offset)*n)
 
 def closed_form(x, h_real_n,f_real_n, A_real,p_real_p, n_real_p):
-
     # returns an expression of the closed form of my model of fft
-    print(A_real)
     return 2*(h_real_n*np.cos(f_real_n*x) - A_real * (x*np.sin(x*p_real_p) - n_real_p * np.cos(p_real_p*x)) / (n_real_p**2 + x**2))
+
+def beat(x, A, f, f2, p, p2,b):
+    return A*np.cos(2*np.pi*f*x + p)*np.cos(2*np.pi*f2*x + p2) + b
+
+def get_values_uc(func, popt, pcov):
+    import inspect
+    try:
+        parameters = inspect.signature(func).parameters
+        parameter_names = [param for param in parameters.keys()][1:] # to exclude independent data variable of the fit function
+    except TypeError:
+        print("Unable to retrieve parameter names for the given function.")
+
+    ucs = np.sqrt(np.diag(pcov))
+    print("Parameter values:")
+    for i, param in enumerate(parameter_names):
+        print(f"{param} = {popt[i]} ± {ucs[i]}")
