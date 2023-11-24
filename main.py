@@ -6,7 +6,6 @@ sys.path.append('/Users/meet/Desktop/Courses/Research/Chem/Code/QA')
 
 from pyscf import gto,scf, cc
 import numpy as np
-import pyscf
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import figure
 import basis_set_exchange as bse
@@ -20,50 +19,45 @@ from scipy.signal import find_peaks
 from scipy.stats import pearsonr
 from m_modules import energy
 from m_modules.energy import *
+from m_modules.fits import *
 from m_modules.config import *
-from m_modules.plots import *
 import scipy
-from scipy.fftpack import idct, idst
-from scipy.signal import unit_impulse as dirac_delta
-exponent = round(2, 2)
-step = 0.1
+import pandas as pd
 
-def initiate(atomic_number):
-    max_lam = atomic_number
-    steps =  int(atomic_number / step  + 1)
-    d = 2.1
-    energy.max_lam, energy.steps, energy.step, energy.exponent, energy.d = max_lam, steps, step, exponent, d
 
-    NN = gto.M(atom= f"{atomic_number} 0 0 0; {atomic_number} 0 0 {d}",unit="Bohr",basis='unc-ccpvdz') # uncontracted cc-pvdz
-    mf_NN, e_NN = new_mol(NN, exponent, 0,0)[1],new_mol(NN,exponent, 0,0)[2]
-    CO, mf_CO, e_CO = new_mol(NN, exponent, -1,1)[:3]
-    BF, mf_BF, e_BF = new_mol(NN, exponent, -2,2) [:3]
 
-    # e_BeNe, e_LiNa,e_HeMg, e_HAl, e_Si = new_mol(NN,exponent,-3,3)[2],new_mol(NN,exponent,-4,4)[2], new_mol(NN,exponent,-5,5)[2],\
-    #                                     new_mol(NN,exponent,-6,6)[2],new_mol(NN,exponent,-7,7)[2]
+def init_alc(atomic_number, exponent, frac_energies,
+             mol_objs: list, args):
 
+    max_d_lam, steps, step, exponent, d = args
+    # energy.max_d_lam, energy.steps, energy.step,\
+    #     energy.exponent, energy.d = max_d_lam, steps, step, exponent, d
+
+    # collecting molecule, converged object, electronic energy into arrays
+
+    mols = mol_objs[0::3]
+    mfs = mol_objs[1::3]
+    e_mol = mol_objs[2::3]
     '''Data for max_lambda = 5 and = 7 is stored in data folder'''
-    ## Calculating actual fractional charge energies
-
-    # data = get_symmetric_change_data(0,max_lam,atomic_number)
-    data = get_symmetric_change_data(0,max_lam,atomic_number)
-    frac_energies,free_energies =  data[0], data[1]
 
     '''getting / generating data for protonation'''
 
-    # gen = False
-    # data = get_asymmetric_change_data(0,max_lam, gen)
-    # R_P,L_P = data[0],data[1]
+    prediction =  []
+    lin_pred = []
 
-    AG_NN = AG(mf_NN) # the alchemical gradient i.e. d_E / d_Z_I for where Z_I are N atoms
-    AG_CO = AG(mf_CO)
-    AG_BF = AG(mf_BF)
+    for i in range(len(mols)):
+        AG_mol = AG(mfs[i]) # the alchemical gradient i.e. d_E / d_Z_I for where Z_I are N atoms
+        # Evaluating the linearized energy gradient at lambda = 0. See argument of d_Z_lambda in get_pred function in energy.py
+        pre_l, pre_nl = gen_data(mols[i],AG_mol,e_mol[i],-i, max_d_lam-i, args)
+        prediction.append(pre_nl)
+        lin_pred.append(pre_l)
 
-    # Evaluating the linearized energy gradient at lambda = 0. See argument fo d_Z_lambda in get_pred function in energy.py
-    pre_NN_l, pre_NN_nl = gen_data(NN,AG_NN,exponent,e_NN,0, max_lam)
-    pre_CO_l, pre_CO_nl = gen_data(CO,AG_CO,exponent,e_CO,-1, max_lam -1)
-    pre_BF_l, pre_BF_nl = gen_data(BF,AG_BF,exponent,e_BF,-2, max_lam -2)
-    prediction_7_3 = np.array([pre_NN_nl, pre_CO_nl, pre_BF_nl])
+    # for ghost_Atom prediction
+    # NN = gto.M(atom= f"{atomic_number*2} 0 0 0; ghost_{get_element_symbol(7)} 0 0 {d}",unit="Bohr",basis='unc-ccpvdz') # uncontracted cc-pvdz
+    # mol, mf_mol, elec_energy = new_mol(NN, 0,0)
+    # pre_l, pre_nl = gen_data(mol,AG(mf_mol),elec_energy,-7, max_d_lam-7, args)
+    # prediction.append(pre_nl)
+    # lin_pred.append(pre_l)
 
     '''
     Preparing prediction data for plotting for symmetrical alchemical changes for n in (0.5, 3) in steps of 0.1'''
@@ -72,130 +66,124 @@ def initiate(atomic_number):
         predictions_n = [...,[pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n],...]
         pre_NN_nl_n = non-linear Z prediction over all lambda at n from NN
     '''
-    # predictions_n = []
-    # for n in np.linspace(0.5,5,46):
-    #     pre_NN_nl_n = gen_data(NN,AG_NN,n,e_NN,0, max_lam)[1]
-    #     pre_CO_nl_n = gen_data(CO,AG_CO,n,e_CO,-1, max_lam -1)[1]
-    #     pre_BF_nl_n = gen_data(BF,AG_BF,n,e_BF,-2, max_lam -2)[1]
-    #     predictions_n.append(np.array([pre_NN_nl_n, pre_CO_nl_n, pre_BF_nl_n]))
-    # predictions_n = np.array(predictions_n)
-    # prediction_2 = predictions_n[15]
 
     # fitting errors only upto a certain lambda
-    max_lam_err = max_lam
+    max_lam_err = max_d_lam
     # store difference between numpy arrays of size (51,) and (3,71) in a numpy array of size (3,51) in one line
-    prediction = prediction_7_3
-    pre_restricted = np.array([ prediction[i][:max_lam_err*int(1/step) + 1] for i in range(3)])
-    dft_restricted = frac_energies[:max_lam_err*int(1/step) + 1]
-    '''Defining the total x_axis'''
-    x_axis = np.linspace(0,max_lam,steps)
 
-    '''Defining the new x axis for fitting errors'''
-    x_axis_err = reflect(x_axis[:max_lam_err*int(1/step) + 1],-1)
-    '''Fitting away 2nd order errors'''
-    first_order_err = reflect(dft_restricted - pre_restricted)
-    # first_order_err = dft_restricted - prediction_7_3[:,:max_lam_err*int(1/step) + 1]
-    err_fits = [] # across the whole x-axis
-    err_res_fits = [] # across restricted x-axis
-    # fitting for only equi. diatomic
-    fit = gaussian_fit
-    for i in range(1):
-        popt_, pcov_ = curve_fit(fit, x_axis_err, first_order_err[i],absolute_sigma=True,maxfev=100000)
-        err_res_fits.append(np.array(fit(x_axis_err, *popt_)))
-        err_fits.append(np.array(fit(reflect(x_axis,-1), *popt_)))
+    x_axis = np.linspace(0,max_d_lam,steps)
 
-    quad_adjusted_pre = reflect(prediction) + np.array(err_fits)
-    quad_adjusted_pre_res = reflect(pre_restricted) + np.array(err_res_fits)
-    # np.array([quad_adjusted_pre[i][max_lam_err*int(1/step):2*max_lam_err*int(1/step) + 1] for i in range(3)])
+    # alc_fitting(atomic_number, frac_energies, step, max_lam_err, x_axis, prediction)
+    # l_nl_plot(atomic_number, exponent, d, frac_energies, pre_NN_l, pre_CO_l, pre_BF_l, prediction, x_axis)
 
-    # plotting error between actual and prediction
-    comps = []
-    for i in range(3):
-        comps.append(get_mol_symbol(atomic_number, i,-i))
+    return prediction, x_axis
 
+def init_sep(Z1,Z2):
+    min = 0.1
+    max = 10
+    stepsize = 0.1
+    from_ = .1
+    to_ = 6
 
-    h_real_n ,f_real_n, A_real,f_real_p, n_real_p, arr_fft,inv_fft = FT(reflect(dft_restricted),quad_adjusted_pre_res, max_lam_err, comps,atomic_number)
-
-    fig1 = plot_errors(fit.__name__,x_axis_err ,reflect(dft_restricted),\
-        reflect(pre_restricted),\
-            quad_adjusted_pre_res , comps, atomic_number)
-
-    second_order_err = reflect(dft_restricted) - quad_adjusted_pre_res
-
-    my_params = [-2.63982116e-02 , 4.03299727e-02 , 2.52607851e-01,  0,0,0]
-    manual_fit = beat(x_axis_err,*my_params)
-
-    err_fits = [] # across the whole x-axis
-    err_res_fits = [] # across restricted x-axis
-    for i in range(1):
-        popt_, pcov_ = curve_fit(beat, x_axis_err, second_order_err[i],absolute_sigma=True,maxfev=100000,\
-            p0 =my_params) #  (A_real, f_real_p,f_real_n,0, 0)
-        err_res_fits.append(np.array(beat(x_axis_err, *popt_)))
-        err_fits.append(np.array(beat(reflect(x_axis,-1), *popt_)))
-    print(popt_)
-    product_sines_pre = quad_adjusted_pre + np.array(err_fits)
-    product_sines_pre_res =  quad_adjusted_pre_res + np.array(err_res_fits)
-
-    fig1 = plot_errors(beat.__name__,x_axis_err ,reflect(dft_restricted),\
-        quad_adjusted_pre_res , product_sines_pre_res,comps, atomic_number, manual_fit)
-
-    plt.show()
-    # correction = closed_form(x_axis_err,h_real_n ,f_real_n, A_real,f_real_p, n_real_p)
-    # subplots = 2
-    # fig, ax = plt.subplots(subplots, 1, figsize=(5*subplots, 5*subplots), sharex=True)
-    # ax[0].plot(inv_fft, label='inverse fft')
-    # ax[0].plot(arr_fft, label=' arr fft')
-    # ax[1].plot(correction, label='correction')
-    # ax[0].legend()
-    # ax[1].legend()
-
-min = 0.1
-max = 10
-stepsize = 0.1
-def init_sep(atomic_num):
-# for i in np.arange(5,19):
-    atoms = np.array([atomic_num,atomic_num])
+    atoms = np.array([Z1,Z2])
     sep = np.arange(min, max+stepsize, stepsize)
-    data = gen_sep_data(atoms[0],atoms[1], min, max, stepsize) - np.prod(atoms) / sep**2 # gives total energy curve
+    data_total = gen_sep_data(atoms[0],atoms[1], min, max, stepsize) # total energy curve
+    data = data_total - np.prod(atoms) / sep # gives total electronic energy curve
 
     # restricting data
-    from_ = 1
-    to_ = 8
+    data_total = data_total[(sep > from_) & (sep < to_)]
     data = data[(sep > from_) & (sep < to_)]
     sep = sep[(sep > from_) & (sep < to_)]
-    exponent = 2.05
+    exponent = 2.0
+
     # fitting
     C = -np.sum(atoms**exponent)
-    U =  -289.201
 
-    # popt_, pcov_ = curve_fit(exp, sep, data,absolute_sigma=True,p0 = (-300, -0.5, -1.5,C-2),maxfev=100000)
-    # fit_ = exp(sep, *popt_)
-
-    popt_, pcov_ = curve_fit(pol_fit, sep, data,absolute_sigma=True,p0 = (-50, 1.8,C),maxfev=100000)
+    popt_, pcov_ = curve_fit(pol_fit, sep, data,absolute_sigma=True,p0 = (-50, 0.9,C),maxfev=100000)
     fit_ = pol_fit(sep, *popt_)
     fitted_exponent = round(popt_[1],3)
 
-    d_i = 2.1
+    d_i = 2.07
     elec_equi, elec_grad, tot_grad = get_mol_energy_grad(atoms[0],atoms[1],d_i)
     gradient = elec_grad[1] # d E / d sep --- keeping left atom fixed and shifting right atom
 
-    prediction = elec_equi + gradient * d_S_gamma(d_i, sep, fitted_exponent)
+    prediction = elec_equi + gradient*d_S_gamma(d_i, sep, fitted_exponent)
 
-    new_prediction = prediction + (data[-1] - prediction[-1])
-    print(elec_equi)
-    get_values_uc(pol_fit, popt_, pcov_)
-    print(f" Unified energy = {pol_fit(0, *popt_)}")
-    # fig, ax = plt.subplots(1, 1, figsize=(10, 10), sharex=True)
+    # new_prediction = prediction + (data[-1] - prediction[-1])
+
+    # get_values_uc(pol_fit, popt_, pcov_)
+    # try:
+    min_index, min_val = find_min(data_total)
+    r_e = sep[min_index]
+    D_e = data_total[-1] - min_val
+    a = 1.42308
+    index, hts = find_peaks(-data_total, height = -min_val)
+    morse, morse_params = fit_me([sep, data_total], morse_potential, [sep[index[0]], D_e, a, data_total[-1]])
+    a = morse_params[2]
+    morse_potential_elec_fit = morse - np.prod(atoms) / sep
+
+    # fourier transforming
+    ft_i = reflect(data - prediction)
+    N = len(ft_i)  # Number of data points
+    normalization = 1 #/ (np.sqrt(2*np.pi))
+    fft_data = normalization * fft.rfft(ft_i)#[3:]
+    real_fft_data = np.real(fft_data)
+    frequencies = fft.rfftfreq(N, d = stepsize)#[3:]
+
+    # plotting peaks in fft
+    peak_indices, peak_dic = find_peaks(real_fft_data,height= 0)
+    peak_freqs = frequencies[peak_indices]
+    peaks = real_fft_data[peak_indices]
+
+    # frequency of the frequencies
+    f_ = 1 / np.diff(peak_freqs)[0]
+
+    model_x = frequencies[2:] #[peak_indices[1]:]
+    model_y = real_fft_data[2:] #[peak_indices[1]:]
+    # fitting damped harmonic
+    damp_har, damp_har_params = fit_me([model_x,model_y ], damped_harmonic, [model_y[0],-0.1,f_,model_x[0]])
+        #* d_S_gamma_morse(d_i, sep, a)
+    #d_S_gamma(d_i, sep, fitted_exponent)
+    modelled_err = fft.irfft(damp_har)
+
+    fig, ax = plt.subplots(4, 1, figsize=(10, 20), sharex=False)
+
     # plotting
-    # ax.scatter(sep, data, label = 'dft calcs')
-    # ax.plot(sep, fit_, label=f'fit = A * d^(-{fitted_exponent}) + C, C = free atom elec energy')
-    # ax.plot(sep, prediction, label='linearized pred')
-    # ax.plot(sep, new_prediction, label='linearized pred')
-    plt.plot(data - new_prediction, label=f'{atomic_num}')
-    # ax.set_title(f'For atomic number {atomic_num}')
-    # ax.set_xlabel("Separation (Bohr); delta = 0.1 Bohr")
-    # ax.set_ylabel("Energy (Hartree)")
-    plt.legend()
+    ax[0].scatter(sep, data, label = 'dft calcs')
+    ax[0].plot(sep, fit_, label=f'fit = A * d^(-{fitted_exponent}) + C, C = free atom elec energy')
+    ax[0].plot(sep, prediction, label='pred')
+    # ax[0].plot(sep, new_prediction, label='pred + C')
+    ax[0].plot(sep, morse_potential_elec_fit, label='Morse - V_NN')
+
+    ax[1].scatter(frequencies, real_fft_data, label='real fft')
+    ax[1].scatter(frequencies, np.imag(fft_data), label='imag fft')
+    ax[1].scatter(peak_freqs, peaks, label='peaks')
+    ax[1].plot(model_x, damp_har, label='damped harmonic')
+    ax[1].set_title(f'Fourier transform of error for {get_mol_symbol((Z1+Z2)/2,(Z1-Z2)/2,(Z2-Z1)/2)}')
+
+
+    ax[2].plot(sep, data - prediction, label=f'{get_mol_symbol((Z1+Z2)/2,(Z1-Z2)/2,(Z2-Z1)/2)}')
+    ax[2].plot(sep, data - morse_potential_elec_fit, label=f'Morse error')
+    # ax[2].plot(modelled_err, label=f'Modelled error')
+
+    ax[3].plot(sep, data_total, label=f'Actual Total')
+    ax[3].plot(sep, morse, label=f'Morse ')
+
+
+
+    ax[0].set_title(f'Energy vs sep {get_mol_symbol((Z1+Z2)/2,(Z1-Z2)/2,(Z2-Z1)/2)}')
+    ax[0].set_xlabel("Separation (Bohr); delta = 0.1 Bohr")
+    ax[0].set_ylabel("Energy (Hartree)")
+
+    ax[2].set_title(f'Error for {get_mol_symbol((Z1+Z2)/2,(Z1-Z2)/2,(Z2-Z1)/2)}. MAE = {round(mae(data, prediction),3)}')
+    ax[0].legend()
+    ax[1].legend()
+    ax[2].legend()
+    ax[3].legend()
+
+    # except:
+    #     pass
+    return np.array(data), np.array(prediction)
 
 
 def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
@@ -210,7 +198,7 @@ def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
     i = 0
     data = err[i][:-1]
     N = len(data)  # Number of data points
-    normalization = 1   # Normalization factor
+    normalization = 1 / (np.sqrt(2*np.pi))   # Normalization factor
     fft_data = np.real(normalization * fft.rfft(data))
     fft_sine_data = fft.fftshift(normalization * scipy.fft.dst(data))[N//2:]
     fft_cos_data = fft.fftshift(normalization * scipy.fft.dct(data))[N//2:]
@@ -227,7 +215,7 @@ def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
      # # finding peaks for feeding curve-fit parameters
     # positive peaks
     # def fitting():
-    peaks_r = find_peaks(fft_data, height = 0.6)
+    peaks_r = find_peaks(fft_data, height = 0.2)
     real_peak_freq = frequencies[peaks_r[0][0]]
     real_peak_height = peaks_r[1]['peak_heights'][0]
     # negative peaks
@@ -244,8 +232,8 @@ def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
 
     real_fit = fit_func(frequencies[peaks_r[0][0]:], *popt_r)
 
-    # ax.plot(frequencies[peaks_r[0][0]:], real_fit)
-    # ax.plot(real_peak_freq_n, real_peak_height_n, 'ro', label=f'neg peak {real_peak_freq_n}')
+    ax.plot(frequencies[peaks_r[0][0]:], real_fit)
+    ax.plot(real_peak_freq_n, real_peak_height_n, 'ro', label=f'neg peak {real_peak_freq_n}')
 
     # fitting()
 
@@ -264,7 +252,6 @@ def FT(actual, new_prediction, max_lam_err, comps, atomic_number):
     ax.legend()
     plt.show()
     return real_peak_height_n,real_peak_freq_n, *popt_r, fft.irfft(array), fft.irfft(fft_data)
-
 
 '''Fitting quarttic error'''
 def perform_quart_err_correction():
@@ -395,7 +382,7 @@ def all_models_all_errs():
     # fig.suptitle(r'Errors for different n where $Z(\lambda) = (Z_i^n + \lambda (Z_f^n-Z_i^n))^{\frac{1}{n}}$', fontsize=25)
 
 def final_err():
-    x_axis = np.linspace(0,max_lam,steps)
+    x_axis = np.linspace(0,max_d_lam,steps)
     err = np.abs(frac_energies - get_fourier_pred(3)[0])
     for i in range(3):
         plt.plot(x_axis,err[i],label=f'for {comps[i]} pred')
@@ -407,3 +394,50 @@ def final_err():
     # create numpy array of same value
     # print(f'MAE errors for 3 fourier terms {mae(frac_energies,get_fourier_pred(3)[0]),mae(frac_energies,get_fourier_pred(3)[1]),mae(frac_energies,get_fourier_pred(3)[2])}')
     plt.show()
+
+
+def calc_energy(perturbation_tuple):
+    atomic_number = 7
+    delta_lambda, delta_gamma = perturbation_tuple
+
+    mol = gto.M(atom= f"{atomic_number} 0 0 0; {atomic_number} 0 0 {delta_gamma}",unit="Bohr",basis='unc-ccpvdz')
+
+    mol = FcM_like(mol,fcs=[-delta_lambda,delta_lambda])
+
+    mf_mol=scf.RKS(mol)
+    mf_mol.xc="PBE0"
+    mf_mol.verbose = 0
+    mf_mol.scf(dm0=mf_mol.init_guess_by_1e())
+    print(f"{perturbation_tuple} DONE ",flush=True)
+    sys.stdout.flush()
+    return perturbation_tuple, round(mf_mol.energy_elec()[0],3)
+
+def atomic_bomb(atomic_number):
+    '''Returns you all errors for all exponents for all 3 delta lambdas'''
+    print(f'starting {atomic_number}')
+    step = 0.1
+    max_d_lam = atomic_number
+    steps =  int(atomic_number / step  + 1)
+    d = 2.1
+    args = [max_d_lam, steps, step, d ]
+
+    exp_dic = {n: [] for n in np.round(np.arange(1.5, 2.5, 0.001),3)}
+
+    dft = get_symmetric_change_data(0,atomic_number,atomic_number, args)[0] # dft electronic energues for the correspoing electronic series
+    mol_objs = tri_party_mol_props(atomic_number, d) # mol_objs for predictions for the corresponding electronic series
+
+    for exponent in list(exp_dic.keys()):
+        a = args.copy()
+        a.insert(-1, exponent)
+        prediction, x_axis = init_alc(atomic_number, exponent, \
+            dft, mol_objs, a)
+
+        all_errs = []
+        for p in prediction:
+            # all errors for prediction at specific d_lambda
+            all_errs_p = np.round(np.array(all_error(dft, p, x_axis)),4)
+            all_errs.append(list(all_errs_p))
+
+        exp_dic[exponent] = all_errs
+
+    return exp_dic

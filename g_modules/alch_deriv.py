@@ -63,7 +63,7 @@ def second_deriv_nuc_nuc(mol,dL):
 
 def first_deriv_elec(mf,int_r):
     P=mf.make_rdm1()
-    return np.einsum('ij,ji',P,int_r)
+    return np.einsum('ij...,ji...',P,int_r)
 
 def second_deriv_elec(mf,int_r,mo1):
     orbo = mf.mo_coeff[:, :mo1.shape[1]]

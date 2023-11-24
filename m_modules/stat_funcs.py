@@ -1,5 +1,8 @@
 import numpy as np
-
+from scipy.optimize import curve_fit
+from scipy.signal import argrelextrema
+import scipy.integrate as spi
+import pandas as pd
 '''Stat functions'''
 # least chi squared function
 def chi_sq(y,y_pred):
@@ -21,13 +24,23 @@ def mae(y,y_pred):
 def std(y,y_pred):
     return np.sqrt(np.sum((y-y_pred)**2)/(len(y)-1))
 
+def get_integral_error(y, y_pred, x_axis):
+    delta_x = np.mean(np.diff(x_axis))
+    return np.abs((np.sum((y-y_pred)[:-1]*delta_x) + np.sum((y-y_pred)[1:]*delta_x)) / 2)
+
+def all_error(y,y_pred, x_axis):
+    # average integral
+    err_funcs = [chi_sq, rmse, max_error, mae, std]
+    errs = [x(y,y_pred) for x in err_funcs]
+    errs.append(get_integral_error(y,y_pred, x_axis))
+    return errs
 
 # extra funcs
 def get_lengths(*args):
     # get lengths of arrays
     lengths = []
     for arg in args:
-        if type(arg) == np.ndarray:
+        if type(arg) == np.ndarray or type(arg) == list:
             lengths.append(len(arg))
         else:
             lengths.append(1)
@@ -48,12 +61,6 @@ def check_even(err):
     flipped_array = np.flip(err)
     return np.isclose(flipped_array, err).all()
 
-# def reflect(arr, neg=1):
-#     flipped_array = np.flip(arr[1:])
-#     even_array = np.append(flipped_array,arr)
-#     return even_array
-
-# fit functions
 def lin_fit(x,m,c):
     return m*x + c
 
@@ -120,6 +127,39 @@ def pol_fit(d, A, n, C):
     # here U is energy at separation of 1 Bohr
     # A = (1 / (C-U))** (1/n) - 1
     # A = 0
+    n = 0.9
     return A / np.power(d,n) + C
 
+def morse_potential(r, r_e, D_e, a,C):
+    return D_e * (1 - np.exp(-a*(r-r_e)))**2 + C
 
+
+def fit_me(data, fit_function, p0=None, bounds=None):
+    x = data[0]
+    y = data[1]
+    if p0 is None:
+        popt, pcov = curve_fit(fit_function, x, y)
+    else:
+        popt, pcov = curve_fit(fit_function, x, y, p0=p0, maxfev=100000)
+    return fit_function(x, *popt), popt # returns the fitted function
+
+
+def find_min(x):
+    # returns index and value of the element
+    index = argrelextrema(x, np.less)[0][0]
+    return index, x[index]
+
+def tuple_coverter(list_of_lists):
+    # for i in range(len(list_of_lists)):
+    #     print(type(tuple(list(list_of_lists[i]))))
+    #     list_of_lists[i] = tuple(list(list_of_lists[i]))
+    array_of_tuples = list(map(tuple, list_of_lists))
+    return array_of_tuples
+
+def check_(combinations, k):
+    for i in range(len(combinations)):
+        if str(tuple(combinations[i])) !=  k[i]:
+            print(f'Problem at index {i}')
+
+def damped_harmonic(x, A,b, f, f_0):
+    return A*np.exp((x-f_0)*b) * np.cos(f*(x-f_0))
