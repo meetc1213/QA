@@ -176,21 +176,26 @@ def get_asymmetric_change_data(min_lam,max_lam, gen=False):
 
 # def get_morse_potential(): # need atomic charges, and separation distance
 def gen_sep_data(Z1, Z2, min_sep,max_sep, sep_step):# need atomic charges, and separation range
-
+    method = 'ROKS'
     folder_path = f'data/sep/step={round(sep_step,2)}/'
-    file_name = f'{Z1,Z2}_morse_{min_sep}_to_{max_sep}.csv'
+    file_name = f'{Z1,Z2}_morse_ROKS_{min_sep}_to_{max_sep}.csv'
     frac_energies = []
     i = round(min_sep,3)
     if not is_file_in_folder(folder_path, file_name):
         for i in np.arange(min_sep, max_sep  + sep_step, sep_step):
             i = round(i,3)
             NN = gto.M(atom= f"{Z1} 0 0 0; {Z2} 0 0 {i}",unit="Bohr",basis='unc-ccpvdz')
-            mf_mol=scf.RKS(NN)
+            mf_mol=scf.ROKS(NN)
             mf_mol.xc="PBE0"
             mf_mol.verbose = 0
             TE = mf_mol.scf(dm0=mf_mol.init_guess_by_1e())
             elec_energy = round(mf_mol.energy_elec()[0],3)
             frac_energies.append(TE)
+
+            if i%0.1 == 0:
+                print(f"YOOOO lambda = {i} done for {Z1}",flush=True)
+                sys.stdout.flush()
+
             i  += sep_step
 
         frac_energies = np.array(frac_energies)

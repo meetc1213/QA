@@ -27,6 +27,7 @@ from scipy.fftpack import idct, idst
 from scipy.signal import unit_impulse as dirac_delta
 exponent = round(2, 2)
 step = 0.1
+
 def initiate(atomic_number):
     max_lam = atomic_number
     steps =  int(atomic_number / step  + 1)
@@ -148,6 +149,53 @@ def initiate(atomic_number):
     # ax[0].legend()
     # ax[1].legend()
 
+min = 0.1
+max = 10
+stepsize = 0.1
+def init_sep(atomic_num):
+# for i in np.arange(5,19):
+    atoms = np.array([atomic_num,atomic_num])
+    sep = np.arange(min, max+stepsize, stepsize)
+    data = gen_sep_data(atoms[0],atoms[1], min, max, stepsize) - np.prod(atoms) / sep**2 # gives total energy curve
+
+    # restricting data
+    from_ = 1
+    to_ = 8
+    data = data[(sep > from_) & (sep < to_)]
+    sep = sep[(sep > from_) & (sep < to_)]
+    exponent = 2.05
+    # fitting
+    C = -np.sum(atoms**exponent)
+    U =  -289.201
+
+    # popt_, pcov_ = curve_fit(exp, sep, data,absolute_sigma=True,p0 = (-300, -0.5, -1.5,C-2),maxfev=100000)
+    # fit_ = exp(sep, *popt_)
+
+    popt_, pcov_ = curve_fit(pol_fit, sep, data,absolute_sigma=True,p0 = (-50, 1.8,C),maxfev=100000)
+    fit_ = pol_fit(sep, *popt_)
+    fitted_exponent = round(popt_[1],3)
+
+    d_i = 2.1
+    elec_equi, elec_grad, tot_grad = get_mol_energy_grad(atoms[0],atoms[1],d_i)
+    gradient = elec_grad[1] # d E / d sep --- keeping left atom fixed and shifting right atom
+
+    prediction = elec_equi + gradient * d_S_gamma(d_i, sep, fitted_exponent)
+
+    new_prediction = prediction + (data[-1] - prediction[-1])
+    print(elec_equi)
+    get_values_uc(pol_fit, popt_, pcov_)
+    print(f" Unified energy = {pol_fit(0, *popt_)}")
+    # fig, ax = plt.subplots(1, 1, figsize=(10, 10), sharex=True)
+    # plotting
+    # ax.scatter(sep, data, label = 'dft calcs')
+    # ax.plot(sep, fit_, label=f'fit = A * d^(-{fitted_exponent}) + C, C = free atom elec energy')
+    # ax.plot(sep, prediction, label='linearized pred')
+    # ax.plot(sep, new_prediction, label='linearized pred')
+    plt.plot(data - new_prediction, label=f'{atomic_num}')
+    # ax.set_title(f'For atomic number {atomic_num}')
+    # ax.set_xlabel("Separation (Bohr); delta = 0.1 Bohr")
+    # ax.set_ylabel("Energy (Hartree)")
+    plt.legend()
 
 
 def FT(actual, new_prediction, max_lam_err, comps, atomic_number):

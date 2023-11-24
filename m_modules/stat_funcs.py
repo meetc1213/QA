@@ -115,3 +115,11 @@ def get_values_uc(func, popt, pcov):
     print("Parameter values:")
     for i, param in enumerate(parameter_names):
         print(f"{param} = {popt[i]} ± {ucs[i]}")
+
+def pol_fit(d, A, n, C):
+    # here U is energy at separation of 1 Bohr
+    # A = (1 / (C-U))** (1/n) - 1
+    # A = 0
+    return A / np.power(d,n) + C
+
+
